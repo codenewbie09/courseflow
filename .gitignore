@@ -26,6 +26,9 @@ env/
 ENV/
 .venv
 
+# Also ignore if in parent directory
+../venv/
+
 # IDE
 .vscode/
 .idea/
