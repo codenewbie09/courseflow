@@ -9,10 +9,19 @@ from contextlib import asynccontextmanager
 import redis
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from courseflow.database import Course, SessionLocal
 from courseflow.worker import process_queue
+from courseflow.metrics import (
+    enrollment_requests_total,
+    enrollment_latency_seconds,
+    queue_depth as queue_depth_gauge,
+    seats_taken as seats_taken_gauge,
+    capacity as capacity_gauge,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,6 +84,7 @@ def ready():
 
 @app.post("/enroll")
 async def enroll(req: EnrollRequest):
+    start_time = time.time()
     queue_key = f"queue:course:{req.course_id}"
 
     try:
@@ -92,25 +102,42 @@ async def enroll(req: EnrollRequest):
 
         rank = r.zrank(queue_key, payload)
 
+        enrollment_requests_total.labels(status="queued").inc()
+        
         return {
             "status": "queued",
             "queue_position": rank + 1 if rank is not None else None,
         }
 
     except redis.exceptions.ConnectionError:
+        enrollment_requests_total.labels(status="error").inc()
         raise HTTPException(status_code=503, detail="Redis unavailable")
+    finally:
+        enrollment_latency_seconds.observe(time.time() - start_time)
 
 
 @app.get("/metrics")
 def metrics(course_id: int = 1):
+    """Application metrics in Prometheus format"""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/metrics/json")
+def metrics_json(course_id: int = 1):
+    """Application metrics in JSON format"""
     db = SessionLocal()
     try:
-        queue_depth = r.zcard(f"queue:course:{course_id}")
+        qd = r.zcard(f"queue:course:{course_id}")
         course = db.query(Course).filter(Course.id == course_id).first()
+
+        queue_depth_gauge.labels(course_id=course_id).set(qd)
+        if course:
+            seats_taken_gauge.labels(course_id=course_id).set(course.seats_taken)
+            capacity_gauge.labels(course_id=course_id).set(course.capacity)
 
         return {
             "course_id": course_id,
-            "queue_depth": queue_depth,
+            "queue_depth": qd,
             "seats_taken": course.seats_taken if course else None,
             "capacity": course.capacity if course else None,
             "status": "operational",
