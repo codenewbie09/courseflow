@@ -30,40 +30,68 @@ A distributed course enrollment system with Redis-based priority queue, PostgreS
 - **Concurrency**: Row-level locking (`SELECT FOR UPDATE`) prevents race conditions
 - **Waitlist**: Automatic waitlist when course is full
 - **Async Processing**: Background worker processes queue independently
-- **Metrics**: Real-time queue depth and enrollment stats
+- **Health Checks**: `/health` and `/ready` endpoints
+- **Graceful Shutdown**: Worker stops cleanly on SIGTERM
+- **Multi-course**: Support for multiple courses via `/courses` endpoint
+- **Docker Ready**: Dockerfile and docker-compose included
 
-## Quick Start (Docker)
+## Quick Start
 
-### Prerequisites
-- Docker
-- Python 3.13+
-
-### Run with Docker
+### Option 1: Docker Compose (Recommended)
 
 ```bash
-# 1. Run PostgreSQL (port 5432)
+# Clone and run
+docker-compose up --build
+
+# Check health
+curl http://localhost:8000/health
+```
+
+### Option 2: Manual
+
+```bash
+# Run PostgreSQL (port 5432)
 docker run -d --name postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=courseflow \
   -p 5432:5432 postgres
 
-# 2. Run Redis (port 6380)
+# Run Redis (port 6380)
 docker run -d --name redis \
   -p 6380:6379 redis
 
-# 3. Set environment variables
+# Set environment variables
 export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/courseflow"
 export REDIS_HOST=localhost
 export REDIS_PORT=6380
 
-# 4. Install & run
+# Install & run
 pip install -r requirements.txt
 python -m courseflow.main
 ```
 
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Liveness probe |
+| `/ready` | GET | Readiness probe (checks Redis + DB) |
+| `/enroll` | POST | Submit enrollment request |
+| `/metrics` | GET | System metrics (supports `?course_id=1`) |
+| `/courses` | GET | List all courses |
+
 ### API Usage
 
 ```bash
+# Check health
+curl http://localhost:8000/health
+
+# Check readiness
+curl http://localhost:8000/ready
+
+# List courses
+curl http://localhost:8000/courses
+
 # Enroll student
 curl -X POST http://localhost:8000/enroll \
   -H "Content-Type: application/json" \
@@ -75,15 +103,8 @@ curl -X POST http://localhost:8000/enroll \
   }'
 
 # Get metrics
-curl http://localhost:8000/metrics
+curl http://localhost:8000/metrics?course_id=1
 ```
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/enroll` | POST | Submit enrollment request |
-| `/metrics` | GET | System metrics |
 
 ## Test Results
 
@@ -108,14 +129,14 @@ tests/integration/test_waitlist.py::test_waitlist_behavior PASSED
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/courseflow` | Database connection |
 | `REDIS_HOST` | `localhost` | Redis host |
-| `REDIS_PORT` | `6380` | Redis port |
+| `REDIS_PORT` | `6379` | Redis port |
 | `SERVER_PORT` | `8000` | HTTP server port |
 
 ## Metrics
 
-Current metrics endpoint (`GET /metrics`):
 ```json
 {
+  "course_id": 1,
   "queue_depth": 0,
   "seats_taken": 5,
   "capacity": 10,
@@ -123,43 +144,10 @@ Current metrics endpoint (`GET /metrics`):
 }
 ```
 
-## Logging
+## Future Work
 
-```
-INFO:courseflow.allocator:Registered 1 in 0.0137s
-INFO:courseflow.worker:Processed: success
-```
-
-## Future Work (v2.2+)
-
-### Observability
 - [ ] Prometheus metrics endpoint
-- [ ] Structured JSON logging
-- [ ] Distributed tracing (OpenTelemetry)
-- [ ] Latency histograms (p50, p95, p99)
-
-### Reliability
-- [ ] Retry logic with exponential backoff
-- [ ] Dead letter queue for failed processing
-- [ ] Graceful shutdown (SIGTERM handling)
-- [ ] Health check endpoints (`/health`, `/ready`)
-
-### Scalability
-- [ ] Horizontal worker scaling (Celery/RQ)
-- [ ] Redis Cluster for HA
-- [ ] Database read replicas
-
-### Security
-- [ ] Rate limiting
 - [ ] JWT Authentication
-- [ ] Input validation (Pydantic)
-
-### API Improvements
-- [ ] API versioning (`/api/v1/`)
-- [ ] OpenAPI/Swagger docs
+- [ ] Rate limiting
 - [ ] WebSocket for real-time status
-
-### Code Quality
-- [ ] Type hints throughout
-- [ ] Environment-based config
-- [ ] Docker containerization
+- [ ] API versioning (`/api/v1/`)

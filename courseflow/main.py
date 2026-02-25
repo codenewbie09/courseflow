@@ -1,7 +1,10 @@
+import os
+import signal
 import asyncio
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 
 import redis
 import uvicorn
@@ -14,8 +17,6 @@ from courseflow.worker import process_queue
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-import os
-
 r = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=int(os.getenv("REDIS_PORT", "6379")),
@@ -23,7 +24,27 @@ r = redis.Redis(
     decode_responses=True
 )
 
-app = FastAPI(title="CourseFlow v2.1")
+worker_task = None
+shutdown_event = asyncio.Event()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global worker_task
+    worker_task = asyncio.create_task(process_queue(course_id=1))
+    logger.info("Worker started")
+    yield
+    logger.info("Shutting down worker...")
+    shutdown_event.set()
+    if worker_task:
+        try:
+            await asyncio.wait_for(worker_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            worker_task.cancel()
+    logger.info("Worker stopped")
+
+
+app = FastAPI(title="CourseFlow v2.1", lifespan=lifespan)
 
 
 class EnrollRequest(BaseModel):
@@ -31,6 +52,25 @@ class EnrollRequest(BaseModel):
     course_id: int
     idempotency_key: str
     priority: int = 0
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+from sqlalchemy import text
+
+@app.get("/ready")
+def ready():
+    try:
+        r.ping()
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        return {"status": "ready", "redis": "ok", "database": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
 
 
 @app.post("/enroll")
@@ -46,7 +86,6 @@ async def enroll(req: EnrollRequest):
             }
         )
 
-        # Priority logic
         score = (time.time() * 1_000_000) - (req.priority * 10_000)
 
         r.zadd(queue_key, {payload: score})
@@ -63,14 +102,14 @@ async def enroll(req: EnrollRequest):
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(course_id: int = 1):
     db = SessionLocal()
     try:
-        queue_depth = r.zcard("queue:course:1")
-
-        course = db.query(Course).filter(Course.id == 1).first()
+        queue_depth = r.zcard(f"queue:course:{course_id}")
+        course = db.query(Course).filter(Course.id == course_id).first()
 
         return {
+            "course_id": course_id,
             "queue_depth": queue_depth,
             "seats_taken": course.seats_taken if course else None,
             "capacity": course.capacity if course else None,
@@ -80,9 +119,22 @@ def metrics():
         db.close()
 
 
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(process_queue(course_id=1))
+@app.get("/courses")
+def list_courses():
+    db = SessionLocal()
+    try:
+        courses = db.query(Course).all()
+        return [
+            {
+                "id": c.id,
+                "name": c.name,
+                "capacity": c.capacity,
+                "seats_taken": c.seats_taken,
+            }
+            for c in courses
+        ]
+    finally:
+        db.close()
 
 
 def calculate_score(priority: int, base_time: float):
@@ -90,4 +142,4 @@ def calculate_score(priority: int, base_time: float):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("SERVER_PORT", "8000")))
