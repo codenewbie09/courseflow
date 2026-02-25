@@ -116,8 +116,26 @@ Why `SELECT FOR UPDATE`?
 | `/health` | GET | Liveness probe |
 | `/ready` | GET | Readiness (Redis + DB connectivity) |
 | `/enroll` | POST | Submit enrollment request |
-| `/metrics` | GET | Queue depth, seats taken, capacity |
+| `/metrics` | GET | Prometheus metrics (Prometheus format) |
+| `/metrics/json` | GET | Application metrics (JSON format) |
 | `/courses` | GET | List courses |
+
+## Prometheus Metrics
+
+```bash
+# Scrape metrics for Prometheus
+curl http://localhost:8000/metrics
+
+# Or get JSON format
+curl http://localhost:8000/metrics/json
+```
+
+Available metrics:
+- `enrollment_requests_total` - Total enrollment requests by status
+- `enrollment_latency_seconds` - Enrollment processing latency histogram
+- `courseflow_queue_depth` - Current queue depth per course
+- `courseflow_seats_taken` - Seats taken per course
+- `courseflow_capacity` - Course capacity
 
 ## Health & Lifecycle
 
@@ -187,7 +205,7 @@ python -m courseflow.main
 
 ## Future Work
 
-- [ ] Prometheus metrics
+- [x] Prometheus metrics
 - [ ] Multi-region replication
 - [ ] WebSocket notifications for waitlist advancement
 - [ ] Dead letter queue for failed enrollments
