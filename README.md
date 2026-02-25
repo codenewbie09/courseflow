@@ -32,30 +32,33 @@ A distributed course enrollment system with Redis-based priority queue, PostgreS
 - **Async Processing**: Background worker processes queue independently
 - **Metrics**: Real-time queue depth and enrollment stats
 
-## Quick Start
+## Quick Start (Docker)
 
 ### Prerequisites
-- PostgreSQL (port 5432)
-- Redis (port 6379)
+- Docker
 - Python 3.13+
 
-### Docker Setup
+### Run with Docker
 
 ```bash
-# Run PostgreSQL
+# 1. Run PostgreSQL (port 5432)
 docker run -d --name postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=courseflow \
   -p 5432:5432 postgres
 
-# Run Redis
+# 2. Run Redis (port 6380)
 docker run -d --name redis \
   -p 6380:6379 redis
 
-# Set environment variables
+# 3. Set environment variables
 export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/courseflow"
 export REDIS_HOST=localhost
 export REDIS_PORT=6380
+
+# 4. Install & run
+pip install -r requirements.txt
+python -m courseflow.main
 ```
 
 ### API Usage
@@ -105,7 +108,7 @@ tests/integration/test_waitlist.py::test_waitlist_behavior PASSED
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/courseflow` | Database connection |
 | `REDIS_HOST` | `localhost` | Redis host |
-| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PORT` | `6380` | Redis port |
 | `SERVER_PORT` | `8000` | HTTP server port |
 
 ## Metrics
